@@ -171,12 +171,15 @@ def run_fn(fn_args: tfx.components.FnArgs):
         tf_transform_output,
         batch_size=_EVAL_BATCH_SIZE)
 
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=fn_args.model_run_dir, update_freq='batch')
+
     model = _build_keras_model()
     model.fit(
         train_dataset,
         steps_per_epoch=fn_args.train_steps,
         validation_data=eval_dataset,
-        validation_steps=fn_args.eval_steps)
+        validation_steps=fn_args.eval_steps,
+        callbacks=[tensorboard_callback])
 
     signatures = {
         'serving_default': _get_serve_tf_examples_fn(model, tf_transform_output),
