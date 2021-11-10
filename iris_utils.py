@@ -114,7 +114,8 @@ def _input_fn(file_pattern: List[Text],
     dataset = data_accessor.tf_dataset_factory(
         file_pattern,
         tfxio.TensorFlowDatasetOptions(batch_size=batch_size),
-        schema=tf_transform_output.raw_metadata.schema)
+        tf_transform_output.raw_metadata.schema
+    )
 
     transform_layer = tf_transform_output.transform_features_layer()
 
