@@ -59,34 +59,6 @@ def _apply_preprocessing(raw_features, tft_layer):
         return transformed_features, None
 
 
-def _get_serve_tf_examples_fn(model, tf_transform_output):
-    # We must save the tft_layer to the model to ensure its assets are kept and tracked.
-    model.tft_layer = tf_transform_output.transform_features_layer()
-
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
-    ])
-    def serve_tf_examples_fn(serialized_tf_examples):
-        # Expected input is a string which is serialized tf.Example format.
-        feature_spec = tf_transform_output.raw_feature_spec()
-        # Because input schema includes unnecessary fields like 'species' and
-        # 'island', we filter feature_spec to include required keys only.
-        required_feature_spec = {
-            k: v for k, v in feature_spec.items() if k in _FEATURE_KEYS
-        }
-        parsed_features = tf.io.parse_example(serialized_tf_examples,
-                                              required_feature_spec)
-
-        # Preprocess parsed input with transform operation defined in
-        # preprocessing_fn().
-        transformed_features, _ = _apply_preprocessing(parsed_features,
-                                                       model.tft_layer)
-        # Run inference with ML model.
-        return model(transformed_features)
-
-    return serve_tf_examples_fn
-
-
 def _input_fn(file_pattern: List[Text],
               data_accessor: tfx.components.DataAccessor,
               tf_transform_output: tft.TFTransformOutput,
@@ -168,10 +140,4 @@ def run_fn(fn_args: tfx.components.FnArgs):
         validation_steps=fn_args.eval_steps,
         callbacks=[tensorboard_callback])
 
-    signatures = {
-        'serving_default': _get_serve_tf_examples_fn(model, tf_transform_output),
-    }
-    model.save(fn_args.serving_model_dir,
-               save_format='tf',
-               #signatures=signatures,
-               include_optimizer=True)
+    model.save(fn_args.serving_model_dir, save_format='tf')
