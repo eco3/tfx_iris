@@ -2,18 +2,15 @@ from typing import List, Text
 from absl import logging
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow_metadata.proto.v0 import schema_pb2
 import tensorflow_transform as tft
-from tensorflow_transform.tf_metadata import schema_utils
 
 from tfx import v1 as tfx
 from tfx_bsl.public import tfxio
 
-# Specify features that we will use.
 _FEATURE_KEYS = [
-    'Sepal.Length', 'Sepal.Width', 'Petal.Length', 'Petal.Width'
+    'sepallength', 'sepalwidth', 'petallength', 'petalwidth'
 ]
-_LABEL_KEY = 'Species'
+_LABEL_KEY = 'class'
 
 _TRAIN_BATCH_SIZE = 20
 _EVAL_BATCH_SIZE = 10
@@ -45,7 +42,7 @@ def preprocessing_fn(inputs):
     # compute the vocabulary dynamically and perform a lookup.
     # Since in this example there are only 3 possible values, we use a hard-coded
     # table for simplicity.
-    table_keys = ['setosa', 'versicolor', 'virginica']  # TODO
+    table_keys = ['Iris-setosa', 'Iris-versicolor', 'Iris-virginica']  # TODO
     initializer = tf.lookup.KeyValueTensorInitializer(
         keys=table_keys,
         values=tf.cast(tf.range(len(table_keys)), tf.int64),
@@ -126,13 +123,6 @@ def _input_fn(file_pattern: List[Text],
 
 
 def _build_keras_model() -> tf.keras.Model:
-    """Creates a DNN Keras model for classifying penguin data.
-
-    Returns:
-      A Keras Model.
-    """
-    # The model below is built with Functional API, please refer to
-    # https://www.tensorflow.org/guide/keras/overview for all API options.
     inputs = [
         keras.layers.Input(shape=(1,), name=_transformed_name(f))
         for f in _FEATURE_KEYS
@@ -185,4 +175,7 @@ def run_fn(fn_args: tfx.components.FnArgs):
     signatures = {
         'serving_default': _get_serve_tf_examples_fn(model, tf_transform_output),
     }
-    model.save(fn_args.serving_model_dir, save_format='tf', signatures=signatures)
+    model.save(fn_args.serving_model_dir,
+               save_format='tf',
+               #signatures=signatures,
+               include_optimizer=True)
