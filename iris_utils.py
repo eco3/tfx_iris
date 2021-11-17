@@ -16,10 +16,6 @@ _TRAIN_BATCH_SIZE = 20
 _EVAL_BATCH_SIZE = 10
 
 
-def _transformed_name(key):
-    return key + '_xf'
-
-
 def preprocessing_fn(inputs):
     """tf.transform's callback function for preprocessing inputs.
 
@@ -35,7 +31,7 @@ def preprocessing_fn(inputs):
     for key in _FEATURE_KEYS:
         # tft.scale_to_z_score computes the mean and variance of the given feature
         # and scales the output based on the result.
-        outputs[_transformed_name(key)] = tft.scale_to_z_score(inputs[key])
+        outputs[key] = tft.scale_to_z_score(inputs[key])
 
     # For the label column we provide the mapping from string to index.
     # We could instead use `tft.compute_and_apply_vocabulary()` in order to
@@ -49,7 +45,7 @@ def preprocessing_fn(inputs):
         key_dtype=tf.string,
         value_dtype=tf.int64)
     table = tf.lookup.StaticHashTable(initializer, default_value=-1)
-    outputs[_transformed_name(_LABEL_KEY)] = table.lookup(inputs[_LABEL_KEY])
+    outputs[_LABEL_KEY] = table.lookup(inputs[_LABEL_KEY])
 
     return outputs
 
@@ -57,7 +53,7 @@ def preprocessing_fn(inputs):
 def _apply_preprocessing(raw_features, tft_layer):
     transformed_features = tft_layer(raw_features)
     if _LABEL_KEY in raw_features:
-        transformed_label = transformed_features.pop(_transformed_name(_LABEL_KEY))
+        transformed_label = transformed_features.pop(_LABEL_KEY)
         return transformed_features, transformed_label
     else:
         return transformed_features, None
@@ -124,7 +120,7 @@ def _input_fn(file_pattern: List[Text],
 
 def _build_keras_model() -> tf.keras.Model:
     inputs = [
-        keras.layers.Input(shape=(1,), name=_transformed_name(f))
+        keras.layers.Input(shape=(1,), name=f)
         for f in _FEATURE_KEYS
     ]
     d = keras.layers.concatenate(inputs)
