@@ -1,11 +1,17 @@
 from typing import List, Text
 from absl import logging
+from os import path
+
 import tensorflow as tf
-from tensorflow import keras
 import tensorflow_transform as tft
+from tensorflow import keras
+import keras_tuner as kt
 
 from tfx import v1 as tfx
+from tfx.components.trainer.fn_args_utils import FnArgs
+from tfx.components.tuner.component import TunerFnResult
 from tfx_bsl.public import tfxio
+
 
 _FEATURE_KEYS = [
     'sepallength', 'sepalwidth', 'petallength', 'petalwidth'
@@ -14,6 +20,11 @@ _LABEL_KEY = 'class'
 
 _TRAIN_BATCH_SIZE = 20
 _EVAL_BATCH_SIZE = 10
+
+_DNN_HIDDEN_LAYER_0 = 'dnn_hidden_layer_0'
+_DNN_HIDDEN_LAYER_1 = 'dnn_hidden_layer_1'
+
+_DNN_HIDDEN_LAYERS = [_DNN_HIDDEN_LAYER_0, _DNN_HIDDEN_LAYER_1]
 
 
 def preprocessing_fn(inputs):
@@ -90,33 +101,76 @@ def _input_fn(file_pattern: List[Text],
     return dataset.map(apply_transform).repeat()
 
 
-def _build_keras_model() -> tf.keras.Model:
+def _build_keras_model(hp: kt.HyperParameters) -> tf.keras.Model:
     inputs = [
         keras.layers.Input(shape=(1,), name=f)
         for f in _FEATURE_KEYS
     ]
     d = keras.layers.concatenate(inputs)
-    for _ in range(2):
-        d = keras.layers.Dense(10, activation='relu')(d)
-    outputs = keras.layers.Dense(3)(d)
+    for layer in _DNN_HIDDEN_LAYERS:
+        d = keras.layers.Dense(int(hp.get(layer)), activation='relu')(d)
+    outputs = keras.layers.Dense(3, activation='softmax')(d)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
     model.compile(
         optimizer=keras.optimizers.Adam(1e-2),
         loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=[keras.metrics.SparseCategoricalAccuracy()])
+        metrics=['accuracy'])
 
     model.summary(print_fn=logging.info)
     return model
 
 
+def _get_hyperparams() -> kt.HyperParameters:
+    hp = kt.HyperParameters()
+
+    hp.Int(_DNN_HIDDEN_LAYER_0, min_value=100, max_value=150)
+    hp.Int(_DNN_HIDDEN_LAYER_1, min_value=50, max_value=70)
+
+    return hp
+
+
+# TFX Tuner will call this function.
+def tuner_fn(fn_args: FnArgs) -> TunerFnResult:
+    working_dir = path.join(
+        fn_args.working_dir[0:(len('Tuner') + fn_args.working_dir.index('Tuner'))],
+        "tensorboards",
+        path.split(fn_args.working_dir.strip("/"))[-1]
+    )
+
+    tuner = kt.RandomSearch(
+        _build_keras_model,
+        max_trials=6,
+        hyperparameters=_get_hyperparams(),
+        allow_new_entries=False,
+        objective="val_accuracy",
+        directory=working_dir,
+        project_name='iris_tune_model',
+    )
+
+    tf_transform_output = tft.TFTransformOutput(fn_args.transform_graph_path)
+    train_dataset = _input_fn(fn_args.train_files,
+                              fn_args.data_accessor,
+                              tf_transform_output,
+                              batch_size=_TRAIN_BATCH_SIZE)
+    eval_dataset = _input_fn(fn_args.eval_files,
+                             fn_args.data_accessor,
+                             tf_transform_output,
+                             batch_size=_TRAIN_BATCH_SIZE)
+
+    return TunerFnResult(
+      tuner=tuner,
+      fit_kwargs={
+          'x': train_dataset,
+          'validation_data': eval_dataset,
+          'steps_per_epoch': fn_args.train_steps,
+          'validation_steps': fn_args.eval_steps,
+          'callbacks': [keras.callbacks.TensorBoard(working_dir)],
+      })
+
+
 # TFX Trainer will call this function.
 def run_fn(fn_args: tfx.components.FnArgs):
-    """Train the model based on given args.
-
-    Args:
-      fn_args: Holds args used to train the model as name/value pairs.
-    """
     tf_transform_output = tft.TFTransformOutput(fn_args.transform_output)
 
     train_dataset = _input_fn(
@@ -132,7 +186,17 @@ def run_fn(fn_args: tfx.components.FnArgs):
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=fn_args.model_run_dir, update_freq='batch')
 
-    model = _build_keras_model()
+    hyperparams = fn_args.hyperparameters
+
+    if hyperparams:
+        if type(hyperparams) is dict and 'values' in hyperparams.keys():
+            hyperparams = hyperparams['values']
+    else:
+        hyperparams = kt.HyperParameters()
+        hyperparams.Fixed(_DNN_HIDDEN_LAYER_0, 100)
+        hyperparams.Fixed(_DNN_HIDDEN_LAYER_1, 50)
+
+    model = _build_keras_model(hyperparams)
     model.fit(
         train_dataset,
         steps_per_epoch=fn_args.train_steps,
