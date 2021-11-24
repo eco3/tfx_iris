@@ -13,9 +13,8 @@ from tfx.components.tuner.component import TunerFnResult
 from tfx_bsl.public import tfxio
 
 
-_FEATURE_KEYS = [
-    'sepallength', 'sepalwidth', 'petallength', 'petalwidth'
-]
+_FEATURE_KEYS = ['sepallength', 'sepalwidth', 'petallength', 'petalwidth']
+_LABELS = ['Iris-setosa', 'Iris-versicolor', 'Iris-virginica']
 _LABEL_KEY = 'class'
 
 _TRAIN_BATCH_SIZE = 20
@@ -28,33 +27,19 @@ _DNN_HIDDEN_LAYERS = [_DNN_HIDDEN_LAYER_0, _DNN_HIDDEN_LAYER_1]
 
 
 def preprocessing_fn(inputs):
-    """tf.transform's callback function for preprocessing inputs.
-
-    Args:
-      inputs: map from feature keys to raw not-yet-transformed features.
-
-    Returns:
-      Map from string feature key to transformed feature.
-    """
     outputs = {}
 
     # Uses features defined in _FEATURE_KEYS only.
     for key in _FEATURE_KEYS:
-        # tft.scale_to_z_score computes the mean and variance of the given feature
-        # and scales the output based on the result.
         outputs[key] = tft.scale_to_z_score(inputs[key])
 
-    # For the label column we provide the mapping from string to index.
-    # We could instead use `tft.compute_and_apply_vocabulary()` in order to
-    # compute the vocabulary dynamically and perform a lookup.
-    # Since in this example there are only 3 possible values, we use a hard-coded
-    # table for simplicity.
-    table_keys = ['Iris-setosa', 'Iris-versicolor', 'Iris-virginica']  # TODO
+    table_keys = _LABELS
     initializer = tf.lookup.KeyValueTensorInitializer(
         keys=table_keys,
         values=tf.cast(tf.range(len(table_keys)), tf.int64),
         key_dtype=tf.string,
-        value_dtype=tf.int64)
+        value_dtype=tf.int64
+    )
     table = tf.lookup.StaticHashTable(initializer, default_value=-1)
     outputs[_LABEL_KEY] = table.lookup(inputs[_LABEL_KEY])
 
@@ -74,19 +59,6 @@ def _input_fn(file_pattern: List[Text],
               data_accessor: tfx.components.DataAccessor,
               tf_transform_output: tft.TFTransformOutput,
               batch_size: int = 200) -> tf.data.Dataset:
-    """Generates features and label for tuning/training.
-
-    Args:
-      file_pattern: List of paths or patterns of input tfrecord files.
-      data_accessor: DataAccessor for converting input to RecordBatch.
-      tf_transform_output: A TFTransformOutput.
-      batch_size: representing the number of consecutive elements of returned
-        dataset to combine in a single batch
-
-    Returns:
-      A dataset that contains (features, indices) tuple where features is a
-        dictionary of Tensors, and indices is a single Tensor of label indices.
-    """
     dataset = data_accessor.tf_dataset_factory(
         file_pattern,
         tfxio.TensorFlowDatasetOptions(batch_size=batch_size),
@@ -102,14 +74,11 @@ def _input_fn(file_pattern: List[Text],
 
 
 def _build_keras_model(hp: kt.HyperParameters) -> tf.keras.Model:
-    inputs = [
-        keras.layers.Input(shape=(1,), name=f)
-        for f in _FEATURE_KEYS
-    ]
+    inputs = [keras.layers.Input(shape=(1,), name=f) for f in _FEATURE_KEYS]
     d = keras.layers.concatenate(inputs)
     for layer in _DNN_HIDDEN_LAYERS:
         d = keras.layers.Dense(int(hp.get(layer)), activation='relu')(d)
-    outputs = keras.layers.Dense(3, activation='softmax')(d)
+    outputs = keras.layers.Dense(len(_LABEL_KEY), activation='softmax')(d)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
     model.compile(
