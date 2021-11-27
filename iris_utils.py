@@ -26,6 +26,42 @@ _DNN_HIDDEN_LAYER_1 = 'dnn_hidden_layer_1'
 _DNN_HIDDEN_LAYERS = [_DNN_HIDDEN_LAYER_0, _DNN_HIDDEN_LAYER_1]
 
 
+def make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
+    model.tft_layer = tf_transform_output.transform_features_layer()
+
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
+    ])
+    def serve_tf_examples_fn(serialized_tf_example):
+        """Returns the output to be used in the serving signature."""
+        raw_feature_spec = tf_transform_output.raw_feature_spec()
+        # Remove label feature since these will not be present at serving time.
+        raw_feature_spec.pop(_LABEL_KEY)
+        raw_features = tf.io.parse_example(serialized_tf_example, raw_feature_spec)
+        transformed_features = model.tft_layer(raw_features)
+        logging.info('serve_transformed_features = %s', transformed_features)
+
+        outputs = model(transformed_features)
+
+        return {'outputs': outputs}
+
+    @tf.function(input_signature=[
+      tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
+    ])
+    def transform_features_fn(serialized_tf_example):
+        """Returns the transformed_features to be fed as input to evaluator."""
+        raw_feature_spec = tf_transform_output.raw_feature_spec()
+        raw_features = tf.io.parse_example(serialized_tf_example, raw_feature_spec)
+        transformed_features = model.tft_layer(raw_features)
+        logging.info('eval_transformed_features = %s', transformed_features)
+        return transformed_features
+
+    return {
+        'serving_default': serve_tf_examples_fn,
+        'transform_features': transform_features_fn
+    }
+
+
 def preprocessing_fn(inputs):
     outputs = {}
 
@@ -78,7 +114,7 @@ def _build_keras_model(hp: kt.HyperParameters) -> tf.keras.Model:
     d = keras.layers.concatenate(inputs)
     for layer in _DNN_HIDDEN_LAYERS:
         d = keras.layers.Dense(int(hp.get(layer)), activation='relu')(d)
-    outputs = keras.layers.Dense(len(_LABEL_KEY), activation='softmax')(d)
+    outputs = keras.layers.Dense(len(_LABELS), activation='softmax')(d)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
     model.compile(
@@ -173,4 +209,6 @@ def run_fn(fn_args: tfx.components.FnArgs):
         validation_steps=fn_args.eval_steps,
         callbacks=[tensorboard_callback])
 
-    model.save(fn_args.serving_model_dir, save_format='tf')
+    signatures = make_serving_signatures(model, tf_transform_output)
+
+    model.save(fn_args.serving_model_dir, save_format='tf', signatures=signatures)
