@@ -189,19 +189,23 @@ def run_fn(fn_args: tfx.components.FnArgs):
         tf_transform_output,
         batch_size=_EVAL_BATCH_SIZE)
 
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=fn_args.model_run_dir, update_freq='batch')
-
-    hyperparams = fn_args.hyperparameters
-
-    if hyperparams:
-        if type(hyperparams) is dict and 'values' in hyperparams.keys():
-            hyperparams = hyperparams['values']
+    if fn_args.custom_config and ('tensorboard_dir' in fn_args.custom_config.keys()) and fn_args.custom_config['tensorboard_dir']:
+        tensorboard_dir = fn_args.custom_config['tensorboard_dir']
     else:
-        hyperparams = kt.HyperParameters()
-        hyperparams.Fixed(_DNN_HIDDEN_LAYER_0, 100)
-        hyperparams.Fixed(_DNN_HIDDEN_LAYER_1, 50)
+        tensorboard_dir = fn_args.model_run_dir
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=tensorboard_dir, update_freq='batch')
 
-    model = _build_keras_model(hyperparams)
+    hyperparameters = fn_args.hyperparameters
+
+    if hyperparameters:
+        if type(hyperparameters) is dict and 'values' in hyperparameters.keys():
+            hyperparameters = hyperparameters['values']
+    else:
+        hyperparameters = kt.HyperParameters()
+        hyperparameters.Fixed(_DNN_HIDDEN_LAYER_0, 100)
+        hyperparameters.Fixed(_DNN_HIDDEN_LAYER_1, 50)
+
+    model = _build_keras_model(hyperparameters)
     model.fit(
         train_dataset,
         steps_per_epoch=fn_args.train_steps,
