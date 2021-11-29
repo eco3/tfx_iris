@@ -12,7 +12,6 @@ from tfx.components.trainer.fn_args_utils import FnArgs
 from tfx.components.tuner.component import TunerFnResult
 from tfx_bsl.public import tfxio
 
-
 _FEATURE_KEYS = ['sepallength', 'sepalwidth', 'petallength', 'petalwidth']
 _LABELS = ['Iris-setosa', 'Iris-versicolor', 'Iris-virginica']
 _LABEL_KEY = 'class'
@@ -26,7 +25,7 @@ _DNN_HIDDEN_LAYER_1 = 'dnn_hidden_layer_1'
 _DNN_HIDDEN_LAYERS = [_DNN_HIDDEN_LAYER_0, _DNN_HIDDEN_LAYER_1]
 
 
-def make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
+def _make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
     model.tft_layer = tf_transform_output.transform_features_layer()
 
     @tf.function(input_signature=[
@@ -46,7 +45,7 @@ def make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
         return {'outputs': outputs}
 
     @tf.function(input_signature=[
-      tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
+        tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
     ])
     def transform_features_fn(serialized_tf_example):
         """Returns the transformed_features to be fed as input to evaluator."""
@@ -60,26 +59,6 @@ def make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
         'serving_default': serve_tf_examples_fn,
         'transform_features': transform_features_fn
     }
-
-
-def preprocessing_fn(inputs):
-    outputs = {}
-
-    # Uses features defined in _FEATURE_KEYS only.
-    for key in _FEATURE_KEYS:
-        outputs[key] = tft.scale_to_z_score(inputs[key])
-
-    table_keys = _LABELS
-    initializer = tf.lookup.KeyValueTensorInitializer(
-        keys=table_keys,
-        values=tf.cast(tf.range(len(table_keys)), tf.int64),
-        key_dtype=tf.string,
-        value_dtype=tf.int64
-    )
-    table = tf.lookup.StaticHashTable(initializer, default_value=-1)
-    outputs[_LABEL_KEY] = table.lookup(inputs[_LABEL_KEY])
-
-    return outputs
 
 
 def _apply_preprocessing(raw_features, tft_layer):
@@ -135,6 +114,26 @@ def _get_hyperparams() -> kt.HyperParameters:
     return hp
 
 
+# TFX Transform will call this function.
+def preprocessing_fn(inputs):
+    outputs = {}
+
+    for key in _FEATURE_KEYS:
+        outputs[key] = tft.scale_to_z_score(inputs[key])
+
+    table_keys = _LABELS
+    initializer = tf.lookup.KeyValueTensorInitializer(
+        keys=table_keys,
+        values=tf.cast(tf.range(len(table_keys)), tf.int64),
+        key_dtype=tf.string,
+        value_dtype=tf.int64
+    )
+    table = tf.lookup.StaticHashTable(initializer, default_value=-1)
+    outputs[_LABEL_KEY] = table.lookup(inputs[_LABEL_KEY])
+
+    return outputs
+
+
 # TFX Tuner will call this function.
 def tuner_fn(fn_args: FnArgs) -> TunerFnResult:
     working_dir = path.join(
@@ -164,14 +163,14 @@ def tuner_fn(fn_args: FnArgs) -> TunerFnResult:
                              batch_size=_TRAIN_BATCH_SIZE)
 
     return TunerFnResult(
-      tuner=tuner,
-      fit_kwargs={
-          'x': train_dataset,
-          'validation_data': eval_dataset,
-          'steps_per_epoch': fn_args.train_steps,
-          'validation_steps': fn_args.eval_steps,
-          'callbacks': [keras.callbacks.TensorBoard(working_dir)],
-      })
+        tuner=tuner,
+        fit_kwargs={
+            'x': train_dataset,
+            'validation_data': eval_dataset,
+            'steps_per_epoch': fn_args.train_steps,
+            'validation_steps': fn_args.eval_steps,
+            'callbacks': [keras.callbacks.TensorBoard(working_dir)],
+        })
 
 
 # TFX Trainer will call this function.
@@ -189,7 +188,8 @@ def run_fn(fn_args: tfx.components.FnArgs):
         tf_transform_output,
         batch_size=_EVAL_BATCH_SIZE)
 
-    if fn_args.custom_config and ('tensorboard_dir' in fn_args.custom_config.keys()) and fn_args.custom_config['tensorboard_dir']:
+    if fn_args.custom_config and ('tensorboard_dir' in fn_args.custom_config.keys()) and fn_args.custom_config[
+        'tensorboard_dir']:
         tensorboard_dir = fn_args.custom_config['tensorboard_dir']
     else:
         tensorboard_dir = fn_args.model_run_dir
@@ -213,6 +213,6 @@ def run_fn(fn_args: tfx.components.FnArgs):
         validation_steps=fn_args.eval_steps,
         callbacks=[tensorboard_callback])
 
-    signatures = make_serving_signatures(model, tf_transform_output)
+    signatures = _make_serving_signatures(model, tf_transform_output)
 
     model.save(fn_args.serving_model_dir, save_format='tf', signatures=signatures)
