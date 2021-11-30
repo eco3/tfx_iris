@@ -40,9 +40,18 @@ def _make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
         transformed_features = model.tft_layer(raw_features)
         logging.info('serve_transformed_features = %s', transformed_features)
 
-        outputs = model(transformed_features)
+        confidence = model(transformed_features)
 
-        return {'outputs': outputs}
+        indices = tf.where(confidence)
+        last_index = indices.get_shape().as_list()[1] - 1
+        last_indices_value = tf.slice(indices, [0, last_index], [-1, -1])
+        classes_shape = tf.reshape(last_indices_value, tf.shape(confidence))
+        class_names = tf.gather(_LABELS, classes_shape)
+
+        return {
+            'confidence': confidence,
+            'labels': class_names
+        }
 
     @tf.function(input_signature=[
         tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
