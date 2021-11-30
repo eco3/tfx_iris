@@ -40,9 +40,27 @@ def _make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
         transformed_features = model.tft_layer(raw_features)
         logging.info('serve_transformed_features = %s', transformed_features)
 
+        outputs = model(transformed_features)
+
+        return {
+            'outputs': outputs,
+        }
+
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')
+    ])
+    def serve_prediction_classes_fn(serialized_tf_example):
+        """Returns the output to be used in the serving signature."""
+        raw_feature_spec = tf_transform_output.raw_feature_spec()
+        # Remove label feature since these will not be present at serving time.
+        raw_feature_spec.pop(_LABEL_KEY)
+        raw_features = tf.io.parse_example(serialized_tf_example, raw_feature_spec)
+        transformed_features = model.tft_layer(raw_features)
+        logging.info('serve_transformed_features = %s', transformed_features)
+
         confidence = model(transformed_features)
 
-        indices = tf.where(confidence)
+        indices = tf.where(tf.less(confidence, 2))
         last_index = indices.get_shape().as_list()[1] - 1
         last_indices_value = tf.slice(indices, [0, last_index], [-1, -1])
         classes_shape = tf.reshape(last_indices_value, tf.shape(confidence))
@@ -66,6 +84,7 @@ def _make_serving_signatures(model, tf_transform_output: tft.TFTransformOutput):
 
     return {
         'serving_default': serve_tf_examples_fn,
+        'predict': serve_prediction_classes_fn,
         'transform_features': transform_features_fn
     }
 
